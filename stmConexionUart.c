@@ -74,7 +74,7 @@ static volatile uint8_t cmd_ready = 0;
 static char cmd_buf[64];
 
 /* Estado */
-static volatile float SP_n = 16.0f;
+static volatile float SP_n = 2.0f;
 static volatile uint8_t sp_changed = 0;
 
 static volatile ctrl_mode_t g_mode = MODE_PID;
@@ -84,7 +84,7 @@ static uint32_t last_hb_ms = 0;
 /* ===== Control (solo cálculo + telemetría) ===== */
 #define CTRL_TS_MS 100
 
-static float Kp_base = 270.0565f;
+static float Kp_base = 400.0f;
 static float Ki_base = 3.2444f;
 static float Kd_base = 0.1013f;
 
@@ -225,7 +225,7 @@ static float control_step(float y_cm, float sp_cm, uint8_t ok, float dt)
     return 0.0f;
   }
 
-  float e = y_cm - sp_cm;
+  float e = sp_cm - y_cm ;
 
   float Kp = Kp_base, Ki = Ki_base, Kd = Kd_base;
 
@@ -340,83 +340,83 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
-  {
-     if (cmd_ready) {
-       __disable_irq();
-       cmd_ready = 0;
-       char local[64];
-       strncpy(local, cmd_buf, sizeof(local) - 1);
-       local[sizeof(local) - 1] = 0;
-       __enable_irq();
+     {
+        if (cmd_ready) {
+          __disable_irq();
+          cmd_ready = 0;
+          char local[64];
+          strncpy(local, cmd_buf, sizeof(local) - 1);
+          local[sizeof(local) - 1] = 0;
+          __enable_irq();
 
-       process_cmd_main(local);
-     }
+          process_cmd_main(local);
+        }
 
-     uint32_t now = HAL_GetTick();
+        uint32_t now = HAL_GetTick();
 
-     if (now - last_hb_ms >= 1000) {
-       last_hb_ms = now;
-       send_status("HB");
-     }
+        if (now - last_hb_ms >= 1000) {
+          last_hb_ms = now;
+          send_status("HB");
+        }
 
-     if (sp_changed) {
-       sp_changed = 0;
-       send_status("SP_NOW");
-     }
+        if (sp_changed) {
+          sp_changed = 0;
+          send_status("SP_NOW");
+        }
 
-     if (mode_changed) {
-       mode_changed = 0;
-       send_status("MODE_NOW");
-     }
+        if (mode_changed) {
+          mode_changed = 0;
+          send_status("MODE_NOW");
+        }
 
-     if (now - last_ctrl_ms < CTRL_TS_MS) { HAL_Delay(1); continue; }
+        if (now - last_ctrl_ms < CTRL_TS_MS) { HAL_Delay(1); continue; }
 
-     float dt = (float)CTRL_TS_MS / 1000.0f;
-     last_ctrl_ms = now;
+        float dt = (float)CTRL_TS_MS / 1000.0f;
+        last_ctrl_ms = now;
 
-     /* ===== Ultrasonico ===== */
-     HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_SET);
-     __HAL_TIM_SET_COUNTER(&htim1, 0);
-     while (__HAL_TIM_GET_COUNTER(&htim1) < 10) {}
-     HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
+        /* ===== Ultrasonico ===== */
+        HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_SET);
+        __HAL_TIM_SET_COUNTER(&htim1, 0);
+        while (__HAL_TIM_GET_COUNTER(&htim1) < 10) {}
+        HAL_GPIO_WritePin(TRIG_PORT, TRIG_PIN, GPIO_PIN_RESET);
 
-     uint8_t ok = 1;
+        uint8_t ok = 1;
 
-     pMillis = HAL_GetTick();
-     while (!HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN) && (HAL_GetTick() - pMillis) < 10) {}
-     if (!HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN)) ok = 0;
-     Value1 = __HAL_TIM_GET_COUNTER(&htim1);
+        pMillis = HAL_GetTick();
+        while (!HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN) && (HAL_GetTick() - pMillis) < 10) {}
+        if (!HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN)) ok = 0;
+        Value1 = __HAL_TIM_GET_COUNTER(&htim1);
 
-     pMillis = HAL_GetTick();
-     while (HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN) && (HAL_GetTick() - pMillis) < 50) {}
-     if (HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN)) ok = 0;
-     Value2 = __HAL_TIM_GET_COUNTER(&htim1);
+        pMillis = HAL_GetTick();
+        while (HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN) && (HAL_GetTick() - pMillis) < 50) {}
+        if (HAL_GPIO_ReadPin(ECHO_PORT, ECHO_PIN)) ok = 0;
+        Value2 = __HAL_TIM_GET_COUNTER(&htim1);
 
-     if (!ok || (Value2 <= Value1)) Distance = 0;
-     else Distance = (uint16_t)((Value2 - Value1) * 0.034f / 2.0f);
+        if (!ok || (Value2 <= Value1)) Distance = 0;
+        else Distance =  (uint16_t)((Value2 - Value1) * 0.034f / 2.0f);
 
-     /* ===== Filtro simple ===== */
-     float y = (float)Distance;
-     if (!dist_f_init) { dist_f = y; dist_f_init = 1; }
-     else dist_f = a_filt * dist_f + (1.0f - a_filt) * y;
+        /* ===== Filtro simple ===== */
+        float y = 29.4 - (float)Distance;
+        if (!dist_f_init) { dist_f = y; dist_f_init = 1; }
+        else dist_f =  a_filt * dist_f + (1.0f - a_filt) * y;
 
-     /* ===== Control ===== */
-     float u_sat = control_step(dist_f, (float)SP_n, ok, dt);
+        /* ===== Control ===== */
+        float u_sat = control_step((dist_f), (float)SP_n, ok, dt);
 
-     /* ===== ACTUACIÓN PWM (NUEVO) ===== */
-     pumps_write(u_sat);
+        /* ===== ACTUACIÓN PWM (NUEVO) ===== */
+        pumps_write(u_sat);
 
-     /* ===== Telemetría SIN floats: T,dist,sp,u,mode (x100) ===== */
-     int32_t dist_x100 = (int32_t)(dist_f * 100.0f);
-     int32_t sp_x100   = (int32_t)(((float)SP_n) * 100.0f);
-     int32_t u_x100    = (int32_t)(u_sat * 100.0f);
-     int32_t mode_i    = (int32_t)g_mode;
+        /* ===== Telemetría SIN floats: T,dist,sp,u,mode (x100) ===== */
+        int32_t dist_x100 = (int32_t)((dist_f) * 100.0f);
+        int32_t sp_x100   = (int32_t)(((float)SP_n) * 100.0f);
+        int32_t u_x100    = (int32_t)(u_sat * 100.0f);
+        int32_t mode_i    = (int32_t)g_mode;
 
-     char msg[120];
-     int n = snprintf(msg, sizeof(msg), "T,%ld,%ld,%ld,%ld\n",
-                      (long)dist_x100, (long)sp_x100, (long)u_x100, (long)mode_i);
-     HAL_UART_Transmit(&huart1, (uint8_t*)msg, (uint16_t)n, 100);
-   }
+        char msg[120];
+        int n = snprintf(msg, sizeof(msg), "T,%ld,%ld,%ld,%ld\n",
+                         (long)dist_x100, (long)sp_x100, (long)u_x100, (long)mode_i);
+        HAL_UART_Transmit(&huart1, (uint8_t*)msg, (uint16_t)n, 100);
+      }
   /* USER CODE END 3 */
 }
 
